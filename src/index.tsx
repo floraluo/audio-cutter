@@ -1,6 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom';
-import Player from './player';
+import Player, { clamp } from './player';
 import FilePicker from './file';
 import Icon from './icon';
 import {
@@ -20,28 +20,54 @@ import {
 import { useClassicState } from './hooks';
 import { SUpportedFormat } from './types';
 
+interface ContainerTimeRange{
+  containerStartTime: number;
+  containerEndTime: number;
+}
+function containerTimeRange(state: any, left: number):ContainerTimeRange { 
+  const { containerWidth, waverWidth, duration, zoomRange } = state;
+  const zoomWaverWidth = waverWidth + zoomRange;
+  const time2WidthRatio = duration / zoomWaverWidth;
+  // const containerEndTime = (1000 + Math.abs(left)) * time2WidthRatio;
+  // const containerStartTime = Math.abs(left) * time2WidthRatio;
+  return {
+    containerStartTime: Math.abs(left) * time2WidthRatio,
+    containerEndTime: (containerWidth + Math.abs(left)) * time2WidthRatio
+  }
+}
 function App() {
   const [state, setState] = useClassicState<{
     file: File | null;
     decoding: boolean;
     audioBuffer: AudioBuffer | null;
     paused: boolean;
+    zoomRange: number;
     startTime: number;
     endTime: number;
+    duration: number;
     currentTime: number;
+    containerWidth: number;
+    waverWidth: number;
+    left: number;
     processing: boolean;
   }>({
     file: null,
     decoding: false,
     audioBuffer: null,
+    zoomRange: 100,
     paused: true,
     startTime: 0,
     endTime: Infinity,
+    duration: Infinity,
     currentTime: 0,
+    containerWidth: 1000,
+    waverWidth: 1000,
+    left: 0,
     processing: false,
   });
 
   const handleFileChange = async (file: File) => {
+    console.log('file :>> ', file);
     if (!isAudio(file)) {
       alert('请选择合法的音频文件');
       return;
@@ -63,6 +89,7 @@ function App() {
       startTime: 0,
       currentTime: 0,
       endTime: audioBuffer.duration / 2,
+      duration: audioBuffer.duration,
     });
   };
 
@@ -84,6 +111,22 @@ function App() {
     });
   };
 
+  const handleWaverMove = (distance: number) => {
+    const { startTime, currentTime, endTime, duration, containerWidth, waverWidth, left } = state;
+    const width2DurationRatio = waverWidth / duration;
+    const leftAfterMove = clamp(left + distance, containerWidth - waverWidth, 0);
+    const moveTimeRange = (leftAfterMove - left) / width2DurationRatio;
+    const startTimeAfterMove = startTime - moveTimeRange;
+    const currentTimeAfterMove = currentTime - moveTimeRange;
+    const endTimeAfterMove = endTime - moveTimeRange;
+    setState({
+      startTime: startTimeAfterMove,
+      currentTime: currentTimeAfterMove,
+      endTime: endTimeAfterMove,
+      left: leftAfterMove
+    });
+  }
+
   const handleEnd = () => {
     setState({
       currentTime: state.startTime,
@@ -103,7 +146,45 @@ function App() {
       paused: false,
     });
   };
-
+  const handleZoomOutClick = () => {
+    const { containerWidth, waverWidth, zoomRange} = state;
+    const zoomWaverWidth = waverWidth - zoomRange;
+    const left = state.left + zoomRange/2;
+    setState({
+      waverWidth: zoomWaverWidth > containerWidth ? zoomWaverWidth : containerWidth,
+      left: left > 0 ? 0 : left,
+    });
+  }
+  const handleZoomInClick = () => {
+    const { waverWidth, zoomRange, left, startTime, endTime, currentTime } = state;
+    const zoomLeft = left - (zoomRange / 2)
+    const { containerStartTime, containerEndTime } = containerTimeRange(state, zoomLeft)
+    // const zoomStartTime = startTime < containerStartTime
+    //   ? containerStartTime
+    //   : startTime > containerEndTime
+    //     ? containerEndTime
+    //     : startTime;
+    const zoomStartTime = clamp(startTime, containerStartTime, containerEndTime)
+    const zoomEndTime = clamp(endTime, containerStartTime, containerEndTime)
+    // const zoomEndTime = endTime < containerStartTime
+    //   ? containerStartTime
+    //   : endTime > containerEndTime
+    //     ? containerEndTime
+    //     : endTime; 
+    const zoomCurrentTime = clamp(currentTime, zoomStartTime, zoomEndTime)
+    // const zoomCurrentTime = currentTime < zoomStartTime
+    //   ? zoomStartTime 
+    //   : currentTime > zoomEndTime
+    //     ? zoomEndTime
+    //     : currentTime;
+    setState({
+      waverWidth: waverWidth + zoomRange,
+      left: zoomLeft,
+      startTime: zoomStartTime,
+      endTime: zoomEndTime,
+      currentTime: zoomCurrentTime
+    });
+  }
   const handleEncode = (type: SUpportedFormat) => {
     const {
       startTime, endTime, audioBuffer, file,
@@ -142,7 +223,7 @@ function App() {
       {
         state.audioBuffer || state.decoding ? (
           <div>
-            <h2 className="app-title">Audio Cutter</h2>
+            {/* <h2 className="app-title">Audio Cutter</h2> */}
 
             {
               state.decoding ? (
@@ -157,9 +238,13 @@ function App() {
                   startTime={state.startTime}
                   endTime={state.endTime}
                   currentTime={state.currentTime}
+                  waverWidth={state.waverWidth}
+                  containerWidth={state.containerWidth}
+                  left={state.left}
                   onStartTimeChange={handleStartTimeChange}
                   onEndTimeChange={handleEndTimeChange}
                   onCurrentTimeChange={handleCurrentTimeChange}
+                  onWaverMove={handleWaverMove}
                   onEnd={handleEnd}
                 />
               )
@@ -187,7 +272,22 @@ function App() {
               >
                 <Icon icon={replayIcon} />
               </button>
-
+              <button
+                type="button"
+                className="ctrl-item"
+                title="缩小"
+                onClick={handleZoomOutClick}
+              >
+                -
+              </button>
+              <button
+                type="button"
+                className="ctrl-item"
+                title="放大"
+                onClick={handleZoomInClick}
+              >
+                +
+              </button>
               <div className="dropdown list-wrap">
                 <button
                   type="button"
@@ -198,14 +298,14 @@ function App() {
                 {
                   !state.processing && (
                     <ul className="list">
-                      <li>
+                      {/* <li>
                         <button
                           type="button"
                           onClick={() => handleEncode('wav')}
                         >
                           Wav
                         </button>
-                      </li>
+                      </li> */}
                       <li>
                         <button
                           type="button"
@@ -224,7 +324,15 @@ function App() {
                 Number.isFinite(state.endTime)
                 && (
                 <span className="seconds">
-                  Select
+                  总时长:
+                  {' '}
+                  <span className="seconds-total">
+                    {
+                    displaySeconds(state.audioBuffer?.duration ?? 0)
+                  }
+                  </span>
+                  {'  '}
+                  选中:
                   {' '}
                   <span className="seconds-range">
                     {
@@ -232,15 +340,7 @@ function App() {
                   }
                   </span>
                   {' '}
-                  of
-                  {' '}
-                  <span className="seconds-total">
-                    {
-                    displaySeconds(state.audioBuffer?.duration ?? 0)
-                  }
-                  </span>
-                  {' '}
-                  (from
+                  (开始时间
                   {' '}
                   <span className="seconds-start">
                     {
@@ -248,12 +348,13 @@ function App() {
                   }
                   </span>
                   {' '}
-                  to
+                  结束时间
                   {' '}
                   <span className="seconds-end">
-                    {
+                  {
                     displaySeconds(state.endTime)
                   }
+                  <input type="text" />
                   </span>
                   )
                 </span>
@@ -262,7 +363,8 @@ function App() {
             </div>
           </div>
         ) : (
-          <div className="landing">
+            <div className="landing">
+              <input type="text" />
             <h2>Audio Cutter</h2>
             <FilePicker onPick={handleFileChange}>
               <div className="file-main">

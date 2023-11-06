@@ -5,15 +5,15 @@ import React, {
   useMemo,
   useRef,
 } from 'react';
-import Waver from './waver';
+import Waver, { Distance } from './waver';
 import Dragger, { Pos } from './dragger';
 import { formatSeconds } from './utils';
 import { useRaf } from './hooks';
 
-const containerWidth = 1000;
+// const containerWidth = 1000;
 const containerHeight = 160;
 
-function clamp(x: number, min: number, max: number) {
+export function clamp(x: number, min: number, max: number) {
   if (x < min) {
     return min;
   }
@@ -41,9 +41,13 @@ interface PlayerProps {
   startTime: number;
   endTime: number;
   currentTime: number;
+  waverWidth: number;
+  containerWidth: number;
+  left: number;
   onStartTimeChange(time: number): void;
   onEndTimeChange(time: number): void;
   onCurrentTimeChange(time: number): void;
+  onWaverMove(distance: number): void;
   onEnd(): void;
 }
 
@@ -53,30 +57,40 @@ export default function Player({
   startTime,
   endTime,
   currentTime,
+  waverWidth,
+  containerWidth,
+  left,
   paused,
   onStartTimeChange,
   onEndTimeChange,
   onCurrentTimeChange,
+  onWaverMove,
   onEnd,
 }: PlayerProps) {
-  const widthDurationRatio = containerWidth / audioBuffer.duration;
-  const time2pos = (time: number) => time * widthDurationRatio;
+  const widthDurationRatio = waverWidth / audioBuffer.duration;
+  const time2pos = (time: number) => time * widthDurationRatio + left;
   const audioRef = useRef<HTMLAudioElement>(null);
   const currentTimeRef = useRef<number>();
 
   const pos2Time = useCallback(
-    (pos: number) => pos / widthDurationRatio,
+    (pos: number) => (pos + Math.abs(left)) / widthDurationRatio,
+    [left, widthDurationRatio],
+  );
+  const distance2Time = useCallback(
+    (distance: number) => distance / widthDurationRatio,
     [widthDurationRatio],
   );
 
   const clampTime = useCallback(
-    (time: number) => clamp(time, 0, audioBuffer.duration),
-    [audioBuffer.duration],
+    // (time: number) => clamp(time, 0, audioBuffer.duration),
+    // [audioBuffer.duration],
+    (time: number) => clamp(time, pos2Time(0), pos2Time(1000)),
+    [pos2Time],
   );
 
-  const start = time2pos(startTime);
-  const end = time2pos(endTime);
-  const current = time2pos(currentTime);
+  let start = time2pos(startTime);
+  let end = time2pos(endTime);
+  let current = time2pos(currentTime);
 
   const currentTimeFormatted = formatSeconds(currentTime);
 
@@ -91,7 +105,10 @@ export default function Player({
   const handleDragCurrent = useCallback(({ x }: Pos) => {
     onCurrentTimeChange(clampTime(pos2Time(x)));
   }, [clampTime, onCurrentTimeChange, pos2Time]);
-
+  const handleWaverMove = useCallback(({ xRange }: Distance) => {
+    onWaverMove(xRange);
+  }, [clampTime, onWaverMove])
+  
   const handleTimeUpdate = () => {
     if (!audioRef.current) return;
     const { currentTime: time } = audioRef.current;
@@ -131,6 +148,12 @@ export default function Player({
     }
   }, [currentTime]);
 
+  useEffect(() => {
+    start = time2pos(startTime);
+    end = time2pos(endTime);
+    current = time2pos(currentTime);
+  }, [waverWidth]);
+
   useRaf(handleTimeUpdate);
 
   return (
@@ -144,10 +167,13 @@ export default function Player({
       <div className="clipper">
         <Waver
           audioBuffer={audioBuffer}
-          width={containerWidth}
+          width={waverWidth}
+          containerWidth={containerWidth}
+          left={left}
           height={containerHeight}
           color1={gray1}
           color2={gray2}
+          onMove={handleWaverMove}
         />
       </div>
       <div
@@ -156,10 +182,13 @@ export default function Player({
       >
         <Waver
           audioBuffer={audioBuffer}
-          width={containerWidth}
+          width={waverWidth}
+          containerWidth={containerWidth}
+          left={left}
           height={containerHeight}
           color1={color1}
           color2={color2}
+          onMove={handleWaverMove}
         />
       </div>
       <Dragger

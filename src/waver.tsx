@@ -6,6 +6,11 @@ import React, {
   useRef,
 } from 'react';
 import getPeaks from './peaks';
+import { Pos } from './dragger';
+export interface Distance {
+  xRange: number;
+  yRange: number;
+}
 
 const dpr = window.devicePixelRatio || 1;
 
@@ -14,20 +19,32 @@ interface AudioWaveProps {
   audioBuffer: AudioBuffer;
   width: number;
   height: number;
+  left: number;
+  containerWidth: number;
   color1?: string;
   color2?: string;
+  onMove(Distance: {
+    xRange: number;
+    yRange: number;
+  }): void;
 }
 
 function AudioWave({
   width,
   height,
+  left,
+  containerWidth,
   color1 = '#ccc',
   color2 = '#ddd',
   audioBuffer,
   className,
+  onMove
 }: AudioWaveProps) {
   const deviceWidth = width * dpr;
-
+  const PreviousPos: Pos = {
+    x: 0,
+    y: 0
+  }
   const peaks = useMemo(
     () => getPeaks(Math.floor(deviceWidth), audioBuffer.getChannelData(0)),
     [audioBuffer, deviceWidth],
@@ -66,6 +83,39 @@ function AudioWave({
     paint();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  useEffect(() => {
+    paint();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [width]);
+
+  const handleMouseDown = (e0: React.MouseEvent) => {
+    let { screenX, screenY } = e0;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      // console.log('e.screenX - screenX :>> ', e.screenX - screenX);
+      const xRange = e.screenX - screenX;
+      if (
+        xRange > 0 && xRange >= Math.abs(left) ||
+        xRange < 0 && xRange >= (width - containerWidth - Math.abs(left))
+      ) {
+        // screenX = e.screenX;
+        // screenY = e.screenY;
+        // return;
+      }
+      onMove({
+        xRange,
+        yRange: e.screenY - screenY,
+      });
+    };
+
+    const handleMouseUp = () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+  };
 
   return (
     <canvas
@@ -74,9 +124,11 @@ function AudioWave({
       style={{
         width: `${width}px`,
         height: `${height}px`,
+        left: `${left}px`
       }}
       width={width * dpr}
       height={height * dpr}
+      onMouseDown={handleMouseDown}
     />
   );
 }
